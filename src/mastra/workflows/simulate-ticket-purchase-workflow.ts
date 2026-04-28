@@ -19,11 +19,6 @@ const quoteSchema = z.object({
   totalUsd: z.number(),
 });
 
-const approvalSchema = z.object({
-  approved: z.boolean(),
-  quote: quoteSchema,
-});
-
 const resultSchema = z.object({
   status: z.enum(["confirmed", "cancelled"]),
   note: z.string(),
@@ -79,42 +74,13 @@ const buildQuote = createStep({
   },
 });
 
-const approvePurchase = createStep({
-  id: "approve-purchase",
-  inputSchema: quoteSchema,
-  suspendSchema: z.object({ message: z.string() }),
-  resumeSchema: z.object({
-    decision: z.enum(["approve", "deny"]),
-  }),
-  outputSchema: approvalSchema,
-  execute: async ({ inputData, resumeData, suspend }) => {
-    if (!resumeData) {
-      return await suspend({
-        message: `Simulate purchase for "${inputData.parkName}" on ${inputData.date} ($${inputData.totalUsd}). Approve or deny?`,
-      });
-    }
-    return {
-      approved: resumeData.decision === "approve",
-      quote: inputData,
-    };
-  },
-});
-
 const chargeCard = createStep({
   id: "charge-card",
-  inputSchema: approvalSchema,
+  inputSchema: quoteSchema,
   outputSchema: resultSchema,
   execute: async ({ inputData }) => {
-    if (!inputData.approved) {
-      return {
-        status: "cancelled" as const,
-        note: "Cancelled.",
-        quote: inputData.quote,
-      };
-    }
-
     const charge = await mockChargeTool.execute!(
-      { amountUsd: inputData.quote.totalUsd },
+      { amountUsd: inputData.totalUsd },
       {},
     );
 
@@ -122,7 +88,7 @@ const chargeCard = createStep({
       return {
         status: "cancelled" as const,
         note: "Payment failed.",
-        quote: inputData.quote,
+        quote: inputData,
       };
     }
 
@@ -131,7 +97,7 @@ const chargeCard = createStep({
       confirmationId: charge.paymentIntentId,
       card: charge.card,
       note: "Simulated charge complete. No money was charged.",
-      quote: inputData.quote,
+      quote: inputData,
     };
   },
 });
@@ -147,14 +113,8 @@ const postPurchaseSummary = createStep({
 
     const { parkName, date, quantity, totalUsd } = inputData.quote;
     const { confirmationId, card } = inputData;
-
-    console.log(
-      `\n[post-purchase-summary] Confirmed booking for ${parkName} on ${date} ` +
-        `(x${quantity}, $${totalUsd}) — conf# ${confirmationId ?? "N/A"}. ` +
-        `Generating visit brief…\n`,
-    );
-
     const agent = mastra?.getAgent("themeParkAgent");
+
     if (!agent) {
       return inputData;
     }
@@ -171,15 +131,7 @@ const postPurchaseSummary = createStep({
       `2. One must-do attraction in the first 30 minutes\n` +
       `3. One specific thing to avoid or watch out for`;
 
-    const stream = await agent.stream(prompt);
-
-    process.stdout.write("[Visit Brief]\n");
-    for await (const chunk of stream.textStream) {
-      process.stdout.write(chunk);
-    }
-    process.stdout.write("\n");
-
-    const visitBrief = await stream.text;
+    const visitBrief = (await agent.generate(prompt)).text;
 
     return { ...inputData, visitBrief };
   },
@@ -192,7 +144,6 @@ export const simulateTicketPurchaseWorkflow = createWorkflow({
 })
   .then(validatePark)
   .then(buildQuote)
-  .then(approvePurchase)
   .then(chargeCard)
   .then(postPurchaseSummary)
   .commit();

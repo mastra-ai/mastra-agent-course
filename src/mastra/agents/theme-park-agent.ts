@@ -4,10 +4,8 @@ import { findQueueTimesParkTool } from "../tools/find-park-tools";
 import { getQueueTimesLiveTool } from "../tools/queue-times-tool";
 import { firecrawlMcpClient } from "../mcp/firecrawl-mcp";
 import { weatherTool } from "../tools/weather-tool";
-import {
-  PromptInjectionDetector,
-  ModerationProcessor,
-} from "@mastra/core/processors";
+import { simulateTicketPurchaseWorkflow } from "../workflows/simulate-ticket-purchase-workflow";
+import { ModerationProcessor } from "@mastra/core/processors";
 
 const { firecrawl_firecrawl_extract } = await firecrawlMcpClient.listTools();
 
@@ -40,6 +38,13 @@ export const themeParkAgent = new Agent({
     - Use weatherTool only if the user asks about weather, or if weather would clearly affect ride recommendations (heavy rain, extreme heat, lightning risk).
     - When calling weatherTool, pass only the city name (e.g., "Orlando" not "Epic Universe, Orlando" or "Orlando, FL").
     - If weather is relevant and no location is confirmed, ask for clarification.
+
+    Ticket purchases:
+    - If the user asks to buy, book, or simulate buying tickets, first confirm park name, date, and quantity. Use getKnownTicketPrice to get the ticket price if available.
+    - Before using simulateTicketPurchaseWorkflow, summarize the simulated purchase and ask for explicit confirmation.
+    - Only use simulateTicketPurchaseWorkflow after the user clearly confirms (for example "yes", "approve", or "confirm").
+    - The purchase is simulated only. No real money is charged.
+    - After the workflow completes, share the confirmation id, simulated card, total, and visitBrief.
 
     Conversation state:
     - After a parkId is confirmed, treat it as the current park for follow-ups until the user changes parks.
@@ -77,5 +82,8 @@ export const themeParkAgent = new Agent({
     getQueueTimesLiveTool,
     firecrawl_firecrawl_extract,
     weatherTool,
+  },
+  workflows: {
+    simulateTicketPurchaseWorkflow,
   },
 });
